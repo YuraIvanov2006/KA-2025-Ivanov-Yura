@@ -6,212 +6,212 @@
     array       dw 10000 dup(0)    ; Array for numbers (16-bit words)
     temp_str    db 16 dup(0)       ; Temporary string for output
     count       dw 0               ; Count of numbers
-    sum         dd 0               ; Sum for mean calculation
-    newline     db 13, 10, '$'
+    sum         dw 0, 0           ; Sum for mean calculation (32-bit)
+    newline     db 13, 10          ; CR, LF for console output
+    ten         dw 10              ; Constant for decimal conversion
 
 .code
-    ASSUME CS:CODE, DS:DATA
-START:
-    MOV AX, @data
-    MOV DS, AX              ; Initialize data segment
-    MOV ES, AX              ; Initialize extra segment
+main proc
+    ; Set up segments
+    mov ax, @data
+    mov ds, ax
+    mov es, ax
 
-    ; Read and parse input
-    MOV word ptr [count], 0
-    MOV dword ptr [sum], 0
+    ; Initialize variables
+    mov word ptr [count], 0
+    mov word ptr [sum], 0
+    mov word ptr [sum+2], 0
+    lea di, array          ; DI points to array start
 
 read_loop:
-    ; Read line from stdin
-    MOV AH, 3Fh         ; DOS read function
-    MOV BX, 0           ; stdin handle
-    MOV CX, 255         ; max bytes to read
-    LEA DX, buffer
-    INT 21h
+    ; Read character by character
+    mov ah, 01h           ; DOS read character function
+    int 21h
     
-    CMP AX, 0           ; Check EOF
-    JLE sort_numbers
+    cmp al, 1Ah           ; Check for Ctrl+Z (EOF)
+    je process_numbers
     
-    ; Parse numbers from buffer
-    LEA SI, buffer
-    MOV CX, [count]
-    LEA DI, array
+    cmp al, 0Dh           ; Check for CR
+    je skip_line_end
+    cmp al, 0Ah           ; Check for LF
+    je continue_read
+    cmp al, 20h           ; Check for space
+    je continue_read
     
-parse_loop:
-    CALL atoi           ; Convert string to integer
-    CMP AX, 32767       ; Check upper bound
-    JG set_max
-    CMP AX, -32768      ; Check lower bound
-    JL set_min
-    JMP store_num
+    ; Start new number
+    mov bx, 0            ; Clear accumulator
+    mov cx, 0            ; Sign flag (0 = positive, 1 = negative)
     
-set_max:
-    MOV AX, 32767
-    JMP store_num
+    cmp al, '-'          ; Check for minus sign
+    jne process_digit
+    mov cx, 1            ; Set negative flag
+    jmp continue_read
+
+process_digit:
+    sub al, '0'          ; Convert ASCII to number
+    cmp al, 9            ; Check if valid digit
+    ja continue_read
     
-set_min:
-    MOV AX, -32768
+    ; Multiply BX by 10 and add new digit
+    push ax              ; Save digit
+    mov ax, bx
+    mul word ptr [ten]   ; DX:AX = AX * 10
+    mov bx, ax           ; Store result back in BX
+    pop ax               ; Restore digit
+    add bx, ax           ; Add new digit
     
-store_num:
-    MOV [DI + CX*2], AX
-    ADD word ptr [sum], AX
-    ADC word ptr [sum+2], 0
-    INC CX
+    ; Check for overflow
+    jo handle_overflow
+    jmp continue_read
+
+handle_overflow:
+    mov bx, 32767        ; Set to max positive value
+    jmp continue_read
+
+store_number:
+    cmp cx, 1            ; Check if negative
+    jne store_positive
+    neg bx               ; Make number negative
     
-    CALL skip_delimiter
-    CMP byte ptr [SI], 0
-    JNE parse_loop
+store_positive:
+    ; Store number in array
+    mov [di], bx
+    add di, 2
+    inc word ptr [count]
     
-    MOV [count], CX
-    JMP read_loop
+    ; Add to sum
+    mov ax, bx
+    cwd                  ; Sign extend AX into DX:AX
+    add word ptr [sum], ax
+    adc word ptr [sum+2], dx
+    
+continue_read:
+    jmp read_loop
 
-sort_numbers:
-    MOV CX, [count]
-    DEC CX              ; CX = count - 1 (outer loop runs count-1 times)
+skip_line_end:
+    mov ah, 01h          ; Read next character
+    int 21h
+    cmp al, 0Ah          ; Check if LF
+    jmp continue_read
 
-outerLoop:
-    PUSH CX            ; Save outer loop counter
-    MOV DX, CX         ; DX keeps track of the number of comparisons
-    LEA SI, array
+process_numbers:
+    ; Sort numbers (bubble sort)
+    mov cx, [count]
+    dec cx               ; CX = count - 1
+    jcxz print_results   ; If count <= 1, skip sorting
+    
+outer_loop:
+    push cx
+    lea si, array
+    mov dx, cx          ; Inner loop counter
+    
+inner_loop:
+    mov ax, [si]         ; Get current number
+    cmp ax, [si+2]       ; Compare with next
+    jle no_swap
+    
+    ; Swap numbers
+    xchg ax, [si+2]
+    mov [si], ax
+    
+no_swap:
+    add si, 2
+    dec dx
+    jnz inner_loop
+    
+    pop cx
+    loop outer_loop
 
-innerLoop:
-    MOV AX, [SI]       ; Load current element
-    CMP AX, [SI+2]     ; Compare with next element
-    JLE nextStep       ; If already in order, skip swapping
-
-    XCHG AX, [SI+2]    ; Swap elements
-    MOV [SI], AX
-
-nextStep:
-    ADD SI, 2          ; Move to next element in array
-    DEC DX             ; Reduce number of comparisons
-    JNZ innerLoop      ; Repeat until DX reaches zero
-
-    POP CX             ; Restore outer loop counter
-    LOOP outerLoop     ; Repeat outer loop
-
-    ; Calculate and print median
-    MOV AX, [count]
-    SHR AX, 1          ; Divide by 2
-    MOV BX, AX         ; Middle index
-    MOV AX, [array + BX*2]
-    CALL print_number
-
+print_results:
+    ; Calculate median
+    mov ax, [count]
+    test ax, ax          ; Check if count is zero
+    jz exit_program      ; Exit if no numbers
+    
+    test ax, 1           ; Check if count is odd
+    jz even_count
+    
+    ; Odd count - take middle element
+    shr ax, 1            ; Divide by 2
+    shl ax, 1            ; Multiply by 2 for array index
+    lea si, array
+    add si, ax
+    mov ax, [si]
+    jmp print_median
+    
+even_count:
+    ; Even count - average two middle elements
+    shr ax, 1            ; Divide by 2
+    dec ax
+    shl ax, 1            ; Multiply by 2 for array index
+    lea si, array
+    add si, ax
+    mov ax, [si]         ; First middle element
+    add ax, [si+2]       ; Add second middle element
+    sar ax, 1            ; Divide by 2
+    
+print_median:
+    call print_number    ; Print median
+    
     ; Calculate and print mean
-    MOV AX, word ptr [sum]
-    MOV DX, word ptr [sum+2]
-    IDIV word ptr [count]
-    CALL print_number
+    mov ax, word ptr [sum]
+    mov dx, word ptr [sum+2]
+    idiv word ptr [count]
+    call print_number
 
+exit_program:    
     ; Exit program
-    MOV AH, 4Ch        ; DOS exit function
-    INT 21h            ; Call DOS interrupt
+    mov ah, 4Ch
+    int 21h
+main endp
 
-; Convert string to integer
-atoi proc
-    PUSH BX
-    PUSH CX
-    XOR AX, AX          ; Result
-    XOR BX, BX          ; Sign flag
-    XOR CX, CX          ; Digit
-    
-    CMP byte ptr [SI], '-'
-    JNE atoi_loop
-    INC SI
-    MOV BX, 1           ; Negative number
-    
-atoi_loop:
-    MOV CL, [SI]
-    CMP CL, 0
-    JE atoi_done
-    CMP CL, ' '
-    JE atoi_done
-    CMP CL, 13
-    JE atoi_done
-    CMP CL, 10
-    JE atoi_done
-    
-    SUB CL, '0'
-    IMUL AX, 10
-    ADD AX, CX
-    INC SI
-    JMP atoi_loop
-    
-atoi_done:
-    CMP BX, 1
-    JNE atoi_exit
-    NEG AX
-    
-atoi_exit:
-    POP CX
-    POP BX
-    RET
-atoi endp
-
-; Skip to next number
-skip_delimiter proc
-    MOV AL, [SI]
-    CMP AL, 0
-    JE skip_exit
-    CMP AL, ' '
-    JE skip_next
-    CMP AL, 13
-    JE skip_next
-    CMP AL, 10
-    JE skip_next
-    RET
-    
-skip_next:
-    INC SI
-    JMP skip_delimiter
-    
-skip_exit:
-    RET
-skip_delimiter endp
-
-; Print number
+; Print signed number in AX to console
 print_number proc
-    PUSH AX
-    PUSH BX
-    PUSH CX
-    PUSH DX
+    push bx
+    push cx
+    push dx
     
-    LEA DI, temp_str + 15
-    MOV byte ptr [DI], '$'
-    MOV BX, 10
-    MOV CX, 0
+    test ax, ax          ; Check if negative
+    jns positive
     
-    CMP AX, 0
-    JGE convert_loop
-    NEG AX
-    PUSH AX
-    MOV AH, 02h
-    MOV DL, '-'
-    INT 21h
-    POP AX
+    push ax
+    mov dl, '-'
+    mov ah, 02h
+    int 21h
+    pop ax
+    neg ax
     
-convert_loop:
-    XOR DX, DX
-    DIV BX
-    ADD DL, '0'
-    DEC DI
-    MOV [DI], DL
-    INC CX
-    CMP AX, 0
-    JNZ convert_loop
+positive:
+    xor cx, cx           ; Digit counter
+    mov bx, 10
     
-    MOV AH, 09h
-    MOV DX, DI
-    INT 21h
+convert:
+    xor dx, dx
+    div bx              ; Divide by 10
+    push dx             ; Save remainder
+    inc cx
+    test ax, ax
+    jnz convert
     
-    MOV AH, 09h
-    LEA DX, newline
-    INT 21h
+print_digits:
+    pop dx
+    add dl, '0'
+    mov ah, 02h
+    int 21h
+    loop print_digits
     
-    POP DX
-    POP CX
-    POP BX
-    POP AX
-    RET
+    ; Print newline
+    mov dl, 13          ; CR
+    mov ah, 02h
+    int 21h
+    mov dl, 10          ; LF
+    mov ah, 02h
+    int 21h
+    
+    pop dx
+    pop cx
+    pop bx
+    ret
 print_number endp
 
-END START
+end main
