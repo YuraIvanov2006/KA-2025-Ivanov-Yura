@@ -2,13 +2,19 @@
 .stack 100h
 
 .data
+    filename    db 'TEST.IN', 0    ; Input file name (uppercase for DOS)
     buffer      db 256 dup(0)      ; Input buffer
     array       dw 10000 dup(0)    ; Array for numbers (16-bit words)
     temp_str    db 16 dup(0)       ; Temporary string for output
     count       dw 0               ; Count of numbers
     sum         dw 0, 0           ; Sum for mean calculation (32-bit)
-    newline     db 13, 10          ; CR, LF for console output
+    file_handle dw 0              ; File handle
     ten         dw 10              ; Constant for decimal conversion
+    error_msg   db 'Error opening file TEST.IN$'
+    median_msg  db 'Median: $'
+    mean_msg    db 'Mean: $'
+    newline     db 13, 10, '$'     ; CRLF string
+    pause_msg   db 'Press any key to continue...$'
 
 .code
 main proc
@@ -17,40 +23,70 @@ main proc
     mov ds, ax
     mov es, ax
 
+    ; Open file for reading
+    mov ah, 3Dh         ; DOS open file function
+    mov al, 0           ; Read access
+    lea dx, filename
+    int 21h
+    jnc file_opened     ; Jump if no error (carry flag not set)
+    
+    ; Print error message
+    mov ah, 09h
+    lea dx, error_msg
+    int 21h
+    mov ah, 09h
+    lea dx, newline
+    int 21h
+    jmp exit_program
+    
+file_opened:
+    mov [file_handle], ax
+
     ; Initialize variables
     mov word ptr [count], 0
     mov word ptr [sum], 0
     mov word ptr [sum+2], 0
     lea di, array          ; DI points to array start
 
-read_loop:
-    ; Read character by character
-    mov ah, 01h           ; DOS read character function
+read_file:
+    ; Read from file
+    mov ah, 3Fh         ; DOS read file function
+    mov bx, [file_handle]
+    mov cx, 255         ; Max bytes to read
+    lea dx, buffer
     int 21h
+    jc file_error       ; Jump if error
     
-    cmp al, 1Ah           ; Check for Ctrl+Z (EOF)
-    je process_numbers
+    test ax, ax         ; Check if EOF (ax = 0)
+    jz process_numbers  ; If EOF, process numbers
     
-    cmp al, 0Dh           ; Check for CR
+    ; Process buffer
+    lea si, buffer
+    mov cx, ax          ; Number of bytes read
+    
+process_buffer:
+    lodsb               ; Load byte from SI into AL and increment SI
+    
+    cmp al, 0Dh         ; Check for CR
     je skip_line_end
-    cmp al, 0Ah           ; Check for LF
-    je continue_read
-    cmp al, 20h           ; Check for space
-    je continue_read
+    cmp al, 0Ah         ; Check for LF
+    je next_char
+    cmp al, 20h         ; Check for space
+    je next_char
     
     ; Start new number
     mov bx, 0            ; Clear accumulator
-    mov cx, 0            ; Sign flag (0 = positive, 1 = negative)
+    mov dx, 0            ; Sign flag (0 = positive, 1 = negative)
     
     cmp al, '-'          ; Check for minus sign
     jne process_digit
-    mov cx, 1            ; Set negative flag
-    jmp continue_read
+    mov dx, 1            ; Set negative flag
+    jmp next_char
 
 process_digit:
     sub al, '0'          ; Convert ASCII to number
     cmp al, 9            ; Check if valid digit
-    ja continue_read
+    ja next_char
     
     ; Multiply BX by 10 and add new digit
     push ax              ; Save digit
@@ -60,16 +96,21 @@ process_digit:
     pop ax               ; Restore digit
     add bx, ax           ; Add new digit
     
-    ; Check for overflow
-    jo handle_overflow
-    jmp continue_read
-
-handle_overflow:
-    mov bx, 32767        ; Set to max positive value
-    jmp continue_read
+    ; Check for number delimiter (space, CR, LF)
+    mov al, [si]
+    cmp al, 20h          ; Space
+    je store_number
+    cmp al, 0Dh          ; CR
+    je store_number
+    cmp al, 0Ah          ; LF
+    je store_number
+    cmp al, 0            ; End of buffer
+    je store_number
+    
+    jmp next_char
 
 store_number:
-    cmp cx, 1            ; Check if negative
+    cmp dx, 1            ; Check if negative
     jne store_positive
     neg bx               ; Make number negative
     
@@ -85,16 +126,53 @@ store_positive:
     add word ptr [sum], ax
     adc word ptr [sum+2], dx
     
-continue_read:
-    jmp read_loop
+next_char:
+    dec cx
+    jnz process_buffer
+    jmp read_file
 
 skip_line_end:
-    mov ah, 01h          ; Read next character
+    dec cx
+    jz read_file
+    inc si               ; Skip CR
+    cmp byte ptr [si], 0Ah  ; Check if LF follows
+    jne next_char
+    inc si               ; Skip LF
+    dec cx
+    jnz process_buffer
+    jmp read_file
+
+file_error:
+    ; Print error message
+    mov ah, 09h
+    lea dx, error_msg
     int 21h
-    cmp al, 0Ah          ; Check if LF
-    jmp continue_read
+    
+    ; Close file if it was opened
+    mov bx, [file_handle]
+    test bx, bx
+    jz no_close
+    mov ah, 3Eh
+    int 21h
+    
+no_close:
+    ; Print pause message
+    mov ah, 09h
+    lea dx, pause_msg
+    int 21h
+    
+    ; Wait for key press
+    mov ah, 01h
+    int 21h
+    
+    jmp exit_program
 
 process_numbers:
+    ; Close file
+    mov ah, 3Eh
+    mov bx, [file_handle]
+    int 21h
+
     ; Sort numbers (bubble sort)
     mov cx, [count]
     dec cx               ; CX = count - 1
@@ -128,6 +206,11 @@ print_results:
     test ax, ax          ; Check if count is zero
     jz exit_program      ; Exit if no numbers
     
+    ; Print "Median: " message
+    mov ah, 09h
+    lea dx, median_msg
+    int 21h
+    
     test ax, 1           ; Check if count is odd
     jz even_count
     
@@ -153,11 +236,25 @@ even_count:
 print_median:
     call print_number    ; Print median
     
+    ; Print "Mean: " message
+    mov ah, 09h
+    lea dx, mean_msg
+    int 21h
+    
     ; Calculate and print mean
     mov ax, word ptr [sum]
     mov dx, word ptr [sum+2]
     idiv word ptr [count]
     call print_number
+    
+    ; Print pause message
+    mov ah, 09h
+    lea dx, pause_msg
+    int 21h
+    
+    ; Wait for key press
+    mov ah, 01h
+    int 21h
 
 exit_program:    
     ; Exit program
@@ -201,11 +298,8 @@ print_digits:
     loop print_digits
     
     ; Print newline
-    mov dl, 13          ; CR
-    mov ah, 02h
-    int 21h
-    mov dl, 10          ; LF
-    mov ah, 02h
+    mov ah, 09h
+    lea dx, newline
     int 21h
     
     pop dx

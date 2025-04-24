@@ -1,2 +1,0 @@
-TASM %1
-TLINK %1
