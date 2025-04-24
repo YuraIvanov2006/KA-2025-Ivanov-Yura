@@ -10,20 +10,18 @@ main PROC
 
     mov dx, offset msg
  
-    mov si, 0; counter 
+    mov si, 0    ; counter 
     mov bx, 3   
-    cmp si, 14
-    jl array_set
     
-
-    array_set:
+array_set:
     add bx, 3
-    mov [msg + si], bx
+    mov di, si
+    add di, di    ; multiply by 2 for word access
+    mov [msg + di], bx
     inc si
     cmp si, 14
     jl array_set
 
-    
     mov ah, 4Ch       
     int 21h
 
