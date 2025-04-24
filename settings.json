@@ -2,6 +2,11 @@
     "masmtasm.ASM.emulator": "dosbox-x",
     "masmtasm.ASM.mode": "workspace",
     "masmtasm.ASM.actions": {
+        
+
+        
+
+
         "TASM": {
             "baseBundle": "<built-in>/TASM.jsdos",
             "before": [
@@ -10,7 +15,7 @@
             "run": [
                 "TASM ${file}",
                 "TLINK ${filename}.obj",
-                "${filename}.exe"
+                ">${filename}"
             ],
             "debug": [
                 "TASM /zi ${file}",
@@ -27,7 +32,7 @@
             "run": [
                 "masm ${file};",
                 "link ${filename}.obj;",
-                "${filename}.exe"
+                ">${filename}"
             ],
             "debug": [
                 "masm ${file};",
@@ -43,7 +48,7 @@
             "run": [
                 "masm ${file};",
                 "link ${filename}.obj;",
-                "${filename}.exe"
+                ">${filename}"
             ],
             "debug": [
                 "masm ${file};",
@@ -59,4 +64,4 @@
         }
     },
     "masmtasm.dosbox.run": "keep"
-} 
+}

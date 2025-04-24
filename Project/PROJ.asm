@@ -11,13 +11,11 @@
     ten         dw 10              ; Constant for decimal conversion
     max_int     dw 32767           ; Maximum 16-bit signed integer
     min_int     dw -32768          ; Minimum 16-bit signed integer
-    median_msg  db 13,10,'Median: $'
-    mean_msg    db 13,10,'Mean: $'
+    median_msg  db 'Median: $'     ; Removed newline before message
+    mean_msg    db 13, 10, 'Mean: $'
     newline     db 13, 10, '$'     ; CRLF string
     error_msg   db 'Error opening file$'
     file_handle dw 0               ; File handle
-    debug_msg   db 'Debug: Count=$'
-    debug_num   db '0000$'
 
 .code
 main proc
@@ -196,14 +194,6 @@ close_file:
     jmp exit_program
 
 process_numbers:
-    ; Debug: Print count of numbers
-    mov ah, 09h
-    lea dx, debug_msg
-    int 21h
-    
-    mov ax, [count]
-    call print_debug_number
-    
     ; Sort numbers (bubble sort)
     mov cx, [count]
     dec cx                        ; CX = count - 1
@@ -246,6 +236,7 @@ print_results:
     jz even_count
     
     ; Odd count - take middle element
+    mov bx, ax                    ; Save count
     shr ax, 1                     ; Divide by 2
     shl ax, 1                     ; Multiply by 2 for array index
     lea si, array
@@ -255,11 +246,12 @@ print_results:
     
 even_count:
     ; Even count - average two middle elements
+    mov bx, ax                    ; Save count
     shr ax, 1                     ; Divide by 2
-    dec ax
+    dec ax                        ; First middle element index
     shl ax, 1                     ; Multiply by 2 for array index
     lea si, array
-    add si, ax
+    add si, ax                    ; Point to first middle element
     mov ax, [si]                  ; First middle element
     add ax, [si+2]                ; Add second middle element
     sar ax, 1                     ; Divide by 2
@@ -284,7 +276,7 @@ exit_program:
     int 21h
 main endp
 
-; Print signed number in AX to console
+; Print signed number in AX to console (no newline)
 print_number proc
     push bx
     push cx
@@ -319,56 +311,10 @@ print_digits:
     int 21h
     loop print_digits
     
-    ; Print newline
-    mov ah, 09h
-    lea dx, newline
-    int 21h
-    
     pop dx
     pop cx
     pop bx
     ret
 print_number endp
-
-; Print debug number (AX) as 4-digit hex
-print_debug_number proc
-    push ax
-    push bx
-    push cx
-    push dx
-    
-    lea di, debug_num
-    
-    ; Convert to hex string
-    mov cx, 4                     ; 4 digits
-convert_hex:
-    rol ax, 4                     ; Rotate left 4 bits
-    mov bx, ax
-    and bx, 0Fh                   ; Get lowest 4 bits
-    add bl, '0'                   ; Convert to ASCII
-    cmp bl, '9'                   ; Check if > 9
-    jle store_hex
-    add bl, 7                     ; Adjust for A-F
-store_hex:
-    mov [di], bl
-    inc di
-    loop convert_hex
-    
-    ; Print debug number
-    mov ah, 09h
-    lea dx, debug_num
-    int 21h
-    
-    ; Print newline
-    mov ah, 09h
-    lea dx, newline
-    int 21h
-    
-    pop dx
-    pop cx
-    pop bx
-    pop ax
-    ret
-print_debug_number endp
 
 end main
