@@ -2,9 +2,9 @@
 .stack 100h
 
 .data
-    filename    db 'test.in', 0     
+    filename    db 'custom.in', 0     ; оголошую всі зміні проекту
     buffer      db 256 dup(0)       
-    array       dw 100 dup(0)       
+    array       dw 10000 dup(0)       
     count       dw 0                
     sum         dw 0                
     ten         dw 10               
@@ -12,13 +12,10 @@
     is_negative db 0                
     
     
-    start_msg   db 'Program started', 13, 10, '$'
-    open_msg    db 'Opening file...', 13, 10, '$'
-    read_msg    db 'Reading file...', 13, 10, '$'
-    sort_msg    db 'Sorting data...', 13, 10, '$'
+    start_msg   db 'Program started', 13, 10, '$'       ; огголошую всі текстові меседжі    
     median_msg  db 'Median: $'
     mean_msg    db 13, 10, 'Average: $'
-    error_file  db 'Error opening file!', 13, 10, '$'
+    error_file  db 'Error opening file!', 13, 10, '$'   ; ерор кетчер 
     count_msg   db 'Numbers found: $'
     newline     db 13, 10, '$'
     file_handle dw 0
@@ -26,23 +23,23 @@
 .code
 main PROC
     
-    mov ax, @data
+    mov ax, @data ; просто оголошую дата сегмент 
     mov ds, ax
 
     
-    mov ah, 09h
-    lea dx, start_msg
-    int 21h
+    mov ah, 09h             ;вивожу меседж про початок програми 
+    lea dx, start_msg          
+    int 21h                 ;екзекьютор програми
 
     
-    mov ah, 3Dh
-    mov al, 0                    
-    lea dx, filename
-    int 21h
-    jnc file_opened
+    mov ah, 3Dh                 ; відкриваю файл із значеннями 
+    mov al, 0                    ; рід онлін 
+    lea dx, filename             ; вказую назву
+    int 21h                      
+    jnc file_opened               ; перехід до відкривання файлу 
     
     
-    mov ah, 09h
+    mov ah, 09h                 ; виводимо помилку і екзіт 
     lea dx, error_file
     int 21h
     jmp exit_program
@@ -51,7 +48,7 @@ file_opened:
     mov [file_handle], ax
     
     
-    xor di, di                  
+    xor di, di                  ; очищую 
     mov word ptr [count], 0     
     mov word ptr [sum], 0       
     mov word ptr [temp], 0      
@@ -66,13 +63,13 @@ read_loop:
     int 21h
     
     
-    cmp ax, 0
+    cmp ax, 0               ;кінець файлу чи нє
     je process_number
     
     mov al, [buffer]           
     
     
-    cmp al, ' '
+    cmp al, ' '                 ; якщо пробіл tab or CR LF, то зберігаю і очищую
     je save_and_reset
     cmp al, 13                 
     je save_and_reset
@@ -82,16 +79,16 @@ read_loop:
     je save_and_reset
     
     
-    cmp al, '-'
-    jne not_negative
-    mov byte ptr [is_negative], 1
-    jmp read_loop
+    cmp al, '-'                 ; чек чи відємне 
+    jne not_negative            ; якщо не відємне, то перехід до not_negative           
+    mov byte ptr [is_negative], ;       [] - звертаємось не до щзмінної я до її значення 
+    jmp read_loop               
     
 not_negative:
     
-    sub al, '0'
+    sub al, '0'     ; віднімаємо 0(48) шоб вийшло число 
     cmp al, 9
-    ja read_loop               
+    ja read_loop               ; чи цифра чи не 
     
     
     mov bx, [temp]
@@ -204,7 +201,7 @@ print_results:
     add dx, [si]               
     
     mov ax, dx
-    sar ax, 1                  
+    sar ax, 1                  ;зсув всі біти вправо на 1
     jmp print_median
     
 odd_count:
@@ -226,8 +223,8 @@ print_median:
     int 21h
     
     mov ax, [sum]
-    cwd                        
-    idiv word ptr [count]
+    cwd                         ; розширення значення з 16 дор 32
+    idiv word ptr [count]       ; ділення 
     call print_number
     
     mov ah, 09h
