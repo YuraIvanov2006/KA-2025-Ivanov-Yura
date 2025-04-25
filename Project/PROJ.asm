@@ -2,287 +2,256 @@
 .stack 100h
 
 .data
-    filename    db 'test.in', 0    ; Input filename
-    buffer      db 256 dup(0)      ; Input buffer
-    array       dw 10000 dup(0)    ; Array for numbers (16-bit words)
-    temp_str    db 16 dup(0)       ; Temporary string for output
-    count       dw 0               ; Count of numbers
-    sum         dw 0, 0           ; Sum for mean calculation (32-bit)
-    ten         dw 10              ; Constant for decimal conversion
-    max_int     dw 32767           ; Maximum 16-bit signed integer
-    min_int     dw -32768          ; Minimum 16-bit signed integer
-    median_msg  db 'Median: $'     ; Removed newline before message
-    mean_msg    db 13, 10, 'Mean: $'
-    newline     db 13, 10, '$'     ; CRLF string
-    error_msg   db 'Error opening file$'
-    file_handle dw 0               ; File handle
+    filename    db 'test.in', 0     ; Input filename
+    buffer      db 256 dup(0)       ; Input buffer for reading
+    array       dw 100 dup(0)       ; Array to store numbers
+    count       dw 0                ; Number of elements in array
+    sum         dw 0                ; Sum for average calculation
+    ten         dw 10               ; For decimal conversion
+    temp        dw 0                ; Temporary storage for number parsing
+    is_negative db 0                ; Flag for negative numbers
+    
+    ; Messages
+    start_msg   db 'Program started', 13, 10, '$'
+    open_msg    db 'Opening file...', 13, 10, '$'
+    read_msg    db 'Reading file...', 13, 10, '$'
+    sort_msg    db 'Sorting data...', 13, 10, '$'
+    median_msg  db 'Median: $'
+    mean_msg    db 13, 10, 'Average: $'
+    error_file  db 'Error opening file!', 13, 10, '$'
+    count_msg   db 'Numbers found: $'
+    newline     db 13, 10, '$'
+    file_handle dw 0
 
 .code
-main proc
-    ; Set up segments
+main PROC
+    ; Set up data segment
     mov ax, @data
     mov ds, ax
-    mov es, ax
+
+    ; Print start message
+    mov ah, 09h
+    lea dx, start_msg
+    int 21h
 
     ; Open file
-    mov ah, 3Dh                   ; DOS open file function
-    mov al, 0                     ; Read access
+    mov ah, 3Dh
+    mov al, 0                    ; Read mode
     lea dx, filename
     int 21h
-    jnc file_opened               ; Jump if no error
+    jnc file_opened
     
-    ; Error opening file
+    ; File error
     mov ah, 09h
-    lea dx, error_msg
+    lea dx, error_file
     int 21h
     jmp exit_program
     
 file_opened:
-    mov [file_handle], ax         ; Save file handle
+    mov [file_handle], ax
+    
+    ; Initialize array index
+    xor di, di                  ; DI will index into array
+    mov word ptr [count], 0     ; Reset count
+    mov word ptr [sum], 0       ; Reset sum
+    mov word ptr [temp], 0      ; Clear temp
+    mov byte ptr [is_negative], 0 ; Clear negative flag
 
-    ; Initialize variables
-    mov word ptr [count], 0
-    mov word ptr [sum], 0
-    mov word ptr [sum+2], 0
-    lea di, array                 ; DI points to array start
-
-read_file:
-    ; Read from file
-    mov ah, 3Fh                   ; DOS read file function
+read_loop:
+    ; Read character from file
+    mov ah, 3Fh
     mov bx, [file_handle]
-    mov cx, 255                   ; Max bytes to read
+    mov cx, 1                   ; Read one character
     lea dx, buffer
     int 21h
-    jnc read_success              ; Jump if no error
     
-    ; Error reading file
-    mov ah, 09h
-    lea dx, error_msg
-    int 21h
-    jmp close_and_exit
+    ; Check for EOF or error
+    cmp ax, 0
+    je process_number
     
-read_success:
-    test ax, ax                   ; Check if EOF (ax = 0)
-    jnz process_buffer_data       ; If not EOF, process buffer
+    mov al, [buffer]           ; Get the character
     
-    ; EOF reached, close file and process numbers
-    mov ah, 3Eh
-    mov bx, [file_handle]
-    int 21h
-    jmp process_numbers
+    ; Skip whitespace
+    cmp al, ' '
+    je save_and_reset
+    cmp al, 13                 ; CR
+    je save_and_reset
+    cmp al, 10                 ; LF
+    je save_and_reset
+    cmp al, 9                  ; Tab
+    je save_and_reset
     
-process_buffer_data:
-    ; Process buffer
-    lea si, buffer
-    mov cx, ax                    ; Number of bytes read
+    ; Check for negative sign
+    cmp al, '-'
+    jne not_negative
+    mov byte ptr [is_negative], 1
+    jmp read_loop
     
-process_buffer:
-    lodsb                         ; Load byte from SI into AL and increment SI
+not_negative:
+    ; Convert digit
+    sub al, '0'
+    cmp al, 9
+    ja read_loop               ; Skip if not a digit
     
-    cmp al, 0Dh                   ; Check for CR
-    je skip_line_end
-    cmp al, 0Ah                   ; Check for LF
-    je next_char
-    cmp al, 20h                   ; Check for space
-    je next_char
-    
-    ; Start new number
-    mov bx, 0                     ; Clear accumulator
-    mov dx, 0                     ; Sign flag (0 = positive, 1 = negative)
-    
-    cmp al, '-'                   ; Check for minus sign
-    jne process_digit
-    mov dx, 1                     ; Set negative flag
-    jmp next_char
-
-process_digit:
-    sub al, '0'                   ; Convert ASCII to number
-    cmp al, 9                     ; Check if valid digit
-    ja next_char
-    
-    ; Multiply BX by 10 and add new digit
-    push ax                       ; Save digit
+    ; Multiply current number by 10 and add new digit
+    mov bx, [temp]
+    mov dx, 10
+    mov cx, ax                 ; Save digit
     mov ax, bx
-    mul word ptr [ten]            ; DX:AX = AX * 10
-    mov bx, ax                    ; Store result back in BX
-    pop ax                        ; Restore digit
-    add bx, ax                    ; Add new digit
-    
-    ; Check for overflow
-    cmp bx, 32767                 ; Check if exceeds max positive
-    jg limit_number
-    cmp bx, -32768                ; Check if below min negative
-    jl limit_number
-    
-    ; Check for number delimiter (space, CR, LF)
-    mov al, [si]
-    cmp al, 20h                   ; Space
-    je store_number
-    cmp al, 0Dh                   ; CR
-    je store_number
-    cmp al, 0Ah                   ; LF
-    je store_number
-    cmp al, 0                     ; End of buffer
-    je store_number
-    
-    jmp next_char
+    mul dx                     ; DX:AX = AX * 10
+    add ax, cx                 ; Add new digit
+    mov [temp], ax
+    jmp read_loop
 
-limit_number:
-    ; Set to maximum/minimum value based on sign
-    cmp dx, 1                     ; Check if negative
-    je set_min
-    mov bx, 32767                 ; Set to max positive
-    jmp store_number
-set_min:
-    mov bx, -32768                ; Set to min negative
+save_and_reset:
+    ; If we have a number in progress, save it
+    cmp word ptr [temp], 0     ; Check if we have a number
+    jne process_number         ; If we have a number, process it
+    jmp read_loop              ; Otherwise continue reading
 
-store_number:
-    cmp dx, 1                     ; Check if negative
-    jne store_positive
-    neg bx                        ; Make number negative
+process_number:
+    ; Process current number
+    mov ax, [temp]
+    
+    ; Apply negative sign if needed
+    cmp byte ptr [is_negative], 0
+    je store_positive
+    neg ax                     ; Make negative if needed
     
 store_positive:
-    ; Store number in array
-    mov [di], bx
-    add di, 2
-    inc word ptr [count]
+    mov [array + di], ax       ; Store in array
+    add di, 2                  ; Next array position
+    inc word ptr [count]       ; Increment count
+    add word ptr [sum], ax     ; Add to sum
     
-    ; Add to sum
-    mov ax, bx
-    cwd                           ; Sign extend AX into DX:AX
-    add word ptr [sum], ax
-    adc word ptr [sum+2], dx
+    ; Reset for next number
+    mov word ptr [temp], 0
+    mov byte ptr [is_negative], 0
     
-next_char:
-    dec cx
-    jnz process_buffer
-    jmp read_file
-
-skip_line_end:
-    dec cx
-    jnz check_lf                  ; If not end of buffer, check for LF
+    ; If we reached EOF, we're done, otherwise continue reading
+    cmp word ptr [count], 100  ; Check if array is full
+    je sort_array              ; If full, stop reading
     
-    ; End of buffer, read more
-    jmp read_file
+    ; Check if we were at EOF
+    cmp ax, 0
+    je sort_array              ; If EOF, we're done
+    jmp read_loop              ; Otherwise continue reading
     
-check_lf:
-    inc si                        ; Skip CR
-    cmp byte ptr [si], 0Ah        ; Check if LF follows
-    jne next_char
-    inc si                        ; Skip LF
-    dec cx
-    jnz continue_process          ; If not end of buffer, continue processing
-    
-    ; End of buffer, read more
-    jmp read_file
-    
-continue_process:
-    jmp process_buffer
-
-close_and_exit:
-    ; Close file if it was opened
-    mov bx, [file_handle]
-    test bx, bx
-    jnz close_file                ; Jump if file handle is not zero
-    
-    jmp exit_program              ; Unconditional jump to exit
-    
-close_file:
-    mov ah, 3Eh
-    int 21h
-    
-    jmp exit_program
-
-process_numbers:
-    ; Sort numbers (bubble sort)
+sort_array:
+    ; Sort array (bubble sort)
     mov cx, [count]
-    dec cx                        ; CX = count - 1
-    jcxz print_results            ; If count <= 1, skip sorting
+    cmp cx, 1                  ; Skip sort if 0 or 1 elements
+    jle print_results
     
-outer_loop:
+    dec cx                     ; CX = count - 1
+    
+sort_outer:
     push cx
     lea si, array
-    mov dx, cx                    ; Inner loop counter
     
-inner_loop:
-    mov ax, [si]                  ; Get current number
-    cmp ax, [si+2]                ; Compare with next
+sort_inner:
+    mov ax, [si]
+    cmp ax, [si+2]
     jle no_swap
-    
-    ; Swap numbers
     xchg ax, [si+2]
     mov [si], ax
     
 no_swap:
     add si, 2
-    dec dx
-    jnz inner_loop
-    
+    loop sort_inner
     pop cx
-    loop outer_loop
-
-print_results:
-    ; Calculate median
-    mov ax, [count]
-    test ax, ax                   ; Check if count is zero
-    jz exit_program               ; Exit if no numbers
+    loop sort_outer
     
-    ; Print "Median: " message
+print_results:
+    ; Print count
+    mov ah, 09h
+    lea dx, count_msg
+    int 21h
+    
+    mov ax, [count]
+    call print_number
+    
+    mov ah, 09h
+    lea dx, newline
+    int 21h
+    
+    ; Check if we have any numbers
+    cmp word ptr [count], 0
+    je close_file
+    
+    ; Calculate and print median
     mov ah, 09h
     lea dx, median_msg
     int 21h
     
-    test ax, 1                    ; Check if count is odd
-    jz even_count
+    mov cx, [count]
+    test cx, 1                 ; Check if count is odd
+    jnz odd_count
+
+    ; Even count - average of two middle elements
+    mov ax, cx
+    shr ax, 1                  ; count/2
+    mov bx, ax
+    dec bx                     ; (count/2)-1
     
-    ; Odd count - take middle element
-    mov bx, ax                    ; Save count
-    shr ax, 1                     ; Divide by 2
-    shl ax, 1                     ; Multiply by 2 for array index
+    shl bx, 1                  ; Convert to word offset
+    shl ax, 1
+    
     lea si, array
-    add si, ax
-    mov ax, [si]
+    add si, bx                 ; Point to first middle element
+    mov dx, [si]               ; Get first middle element
+    add si, 2                  ; Move to second middle element
+    add dx, [si]               ; Add second middle element
+    
+    mov ax, dx
+    sar ax, 1                  ; Divide by 2 (signed)
     jmp print_median
     
-even_count:
-    ; Even count - average two middle elements
-    mov bx, ax                    ; Save count
-    shr ax, 1                     ; Divide by 2
-    dec ax                        ; First middle element index
-    shl ax, 1                     ; Multiply by 2 for array index
+odd_count:
+    ; Odd count - middle element
+    mov ax, cx
+    shr ax, 1                  ; count/2
+    shl ax, 1                  ; Convert to word offset
+    
     lea si, array
-    add si, ax                    ; Point to first middle element
-    mov ax, [si]                  ; First middle element
-    add ax, [si+2]                ; Add second middle element
-    sar ax, 1                     ; Divide by 2
+    add si, ax                 ; Point to middle element
+    mov ax, [si]               ; Get middle element
     
 print_median:
-    call print_number             ; Print median
+    call print_number
     
-    ; Print "Mean: " message
+    ; Calculate and print mean
     mov ah, 09h
     lea dx, mean_msg
     int 21h
     
-    ; Calculate and print mean
-    mov ax, word ptr [sum]
-    mov dx, word ptr [sum+2]
+    mov ax, [sum]
+    cwd                        ; Sign extend to DX:AX
     idiv word ptr [count]
     call print_number
-
-exit_program:    
-    ; Exit program
+    
+    mov ah, 09h
+    lea dx, newline
+    int 21h
+    
+close_file:
+    ; Close file
+    mov ah, 3Eh
+    mov bx, [file_handle]
+    int 21h
+    
+exit_program:
     mov ah, 4Ch
     int 21h
-main endp
+main ENDP
 
-; Print signed number in AX to console (no newline)
-print_number proc
+; Print signed number in AX
+print_number PROC
     push bx
     push cx
     push dx
     
-    test ax, ax                   ; Check if negative
+    test ax, ax
     jns positive
     
     push ax
@@ -293,13 +262,13 @@ print_number proc
     neg ax
     
 positive:
-    xor cx, cx                    ; Digit counter
+    mov cx, 0
     mov bx, 10
     
 convert:
     xor dx, dx
-    div bx                        ; Divide by 10
-    push dx                       ; Save remainder
+    div bx
+    push dx
     inc cx
     test ax, ax
     jnz convert
@@ -315,6 +284,6 @@ print_digits:
     pop cx
     pop bx
     ret
-print_number endp
+print_number ENDP
 
 end main
